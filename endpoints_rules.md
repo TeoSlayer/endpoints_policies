@@ -1376,6 +1376,13 @@ performance run and individually meet the model-specific inline threshold define
 [reference implementation](#291-reference-implementation). A missing, null, or below-threshold
 inline score is non-conforming. Scores at other points cannot compensate for a failing point.
 
+Without `c_min_override`, the Ultra Low accuracy validation result MUST come from the mandatory
+point at the derived $C_{min}$. With an override, the submitter may designate any submitted point
+in $[1, C_{min}]$ as the mandatory Ultra Low point and submit its accuracy validation result.
+Other points in that region are submitter's-choice points and carry no accuracy validation run.
+No result may fill two concurrency regions; use the same designated results for coverage and the
+multi-turn mean. The elected Offline exception (§5.7.2) remains applicable.
+
 ### 4.4 Reporting Basis (Steady-State Window)
 
 Until v0.7, a point's metrics ([§4.1](#41-primary-metrics)) were averaged over the whole
@@ -1958,9 +1965,9 @@ Offline point does not apply to them ([§5.7](#57-offline-point)):
 
 | Points | Placement |
 |---|---|
-| 1 mandatory point | One low-latency point in the [Ultra Low Concurrency region](#low-latency-region) (concurrency 1–32). |
+| 1 mandatory point | One point in the [Ultra Low Concurrency region](#low-latency-region). |
 | 3 mandatory points | One point in each of the three [Concurrency regions](#concurrency-regions) (Low Concurrency, Medium Concurrency, High Concurrency). |
-| 3 submitter's-choice points | Any concurrency level in any of the three "concurrency" regions, at the submitter's discretion. |
+| 3 submitter's-choice points | Three additional distinct points, placed as specified [below](#submitters-choice-points). |
 | 1 mandatory **Offline** point | The unconstrained-throughput point defined in [§5.7](#57-offline-point). Required for every non-agentic submission; not applicable to agentic benchmarks. Where the submitter elects the $C_{max}$ point as the Offline result ([§5.7.2](#572-relationship-to-maximum-supported-concurrency)), no separate run is required and the minimum is 7. |
 
 Accuracy validation runs are required at exactly `N` points, and at no others: the four mandatory
@@ -1980,10 +1987,11 @@ performance across a region.
 
 #### Submitter's-Choice Points
 
-The 3 submitter's-choice points may be placed in any of the three "concurrency" regions, including
-regions that already have a required point. For example, a submitter could place all 3 additional
-points in the High Concurrency region to demonstrate scaling behavior, or distribute them to show
-overall consistency.
+The 3 submitter's-choice points may be placed in any of the Low, Medium, or High Concurrency
+regions, including regions that already have a required point. Submissions that declare
+`c_min_override` may also place them in the Ultra Low Concurrency region. For example, a submitter
+could place all 3 additional points in the High Concurrency region to demonstrate scaling behavior,
+or distribute them to show overall consistency. All seven concurrency points MUST be distinct.
 
 ### 5.4 Regions of Interest
 
@@ -1991,49 +1999,67 @@ overall consistency.
 > Regions of Interest (ROIs) are named for either latency or concurrency, and in both cases they are
 > constrained by concurrency. Please read the methodology carefully before proceeding.
 
-The concurrency space is divided into four regions.
+The concurrency space is divided into four distinct regions.
 
 #### Ultra Low Concurrency Region <a id="low-latency-region"></a>
 
 | Property | Value |
 |---|---|
-| Concurrency range | 1 to 32 (inclusive), fixed across all submissions. |
 | Required points | 1 |
+| Concurrency range | 1–$C_{min}$ (inclusive), with $1 \le C_{min} \le 32$. |
+
+By default, $C_{min}$ is the lowest submitted fixed concurrency. The point at $C_{min}$ is the
+mandatory Ultra Low point; all other fixed-concurrency points are in the Low, Medium, or High
+Concurrency regions.
+
+Alternatively, submitters may set `c_min_override` in their `system_desc.json` to define $C_{min}$
+independently of the lowest measured concurrency. A point at the declared $C_{min}$ is required,
+but any submitted point in $[1, C_{min}]$ may be designated as the mandatory Ultra Low point.
+Additional points in that region are permitted as submitter's-choice points.
+
+In both cases, $C_{min} \le 32$ guarantees a measurement in the 1–32 range. Region placement and
+accuracy selection follow these boundaries; the duration and dataset requirements in
+[§6](#6-run-requirements-per-measurement-point) use fixed concurrency thresholds independently.
 
 *Rationale:* Low-concurrency operation is critical for interactive applications (chatbots, coding
-assistants, real-time translation). Fixed boundaries ensure direct cross-submission comparability —
-every submission has at least one point in the 1–32 range.
+assistants, real-time translation). Additionally, the override option distinguishes the region
+boundary from the lowest measurement while retaining at least one point in the 1–32 range for
+cross-submission comparability.
 
 > [!NOTE]
 > Submitters are encouraged — but not required — to include a measurement at concurrency 1 (the
-> single-user baseline) as their Low Latency point. Concurrency 1 represents the best-case per-user
-> experience and is commonly cited in performance comparisons, but any concurrency level in the 1–32
-> range satisfies the region requirement.
-
-> [!WARNING]
-> The bounds of the Ultra Low Concurrency region (currently 1–32) are final for Endpoints v1.0, but
-> they may be adjusted by the working group in a future version of these rules.
+> single-user baseline). Concurrency 1 represents the best-case per-user experience and is commonly
+> cited in performance comparisons. The mandatory Ultra Low point must follow the placement and
+> accuracy-selection rules above.
 
 #### Maximum Supported Concurrency
 
-The concurrency regions are defined using the **minimum concurrency** value $C_{min}$ (ideally
-corresponds to the best interactivity on the system) and a **maximum supported concurrency** value
-$C_{max}$ (this is the highest concurrency level at which the submitter chooses to benchmark their
-system).
+The concurrency regions are defined using the **Ultra Low Concurrency Region bound**
+$C_{min}$ and a **maximum supported concurrency** value $C_{max}$ (this is the highest
+concurrency level at which the submitter chooses to benchmark their system).
+$C_{max}$ is the upper bound of the **High Concurrency Region**.
 
 Rules:
 
-- $C_{min}$ is derived from the submission points, and $C_{max}$ defines the upper bound of the High
-  Throughput region.
+- By default, $C_{min}$ is the lowest submitted fixed concurrency and MUST be in `[1,32]`.
+  $C_{max}$ is defined by the submitter as the upper bound of the High Concurrency region.
+- Submitters may alternatively choose to set $C_{min}$ using top-level `c_min_override`
+  in `system_desc.json`. It MUST be a JSON integer in `[1,32]` equal to the
+  concurrency of a submitted point on that curve. All other values, including `null`, are rejected.
+- Either every point of a submission curve MUST omit the field `c_min_override`, or every point MUST
+  declare the same value. Different pareto curves may choose different values.
 - $C_{max}$ >> $C_{min}$.
 - There is no compliance test to force a particular value of $C_{max}$.
 - Submitters are incentivized to choose well: $C_{max}$ defines the extent of their published pareto
-  curve, while $C_{min}$ should produce best case interactivity.
+  curve, while $C_{min}$ determines how its concurrency regions are divided.
 - The value of $C_{max}$ defines the upper bound of the High Concurrency region.
+
+Override declarations are fixed once peer review starts; see
+[Submission Rules §8.1](endpoints_submission_rules.md#81-corrections).
 
 #### Concurrency Regions <a id="concurrency-regions"></a>
 
-Beyond the Ultra Low Concurrency region (concurrency > $C_{min}$), the remaining concurrency space
+Beyond the `Ultra Low Concurrency` region (concurrency > $C_{min}$), the concurrency space
 up to $C_{max}$ is divided into **three equal regions in logarithmic space (base 2)**.
 
 **Region Boundary Computation**
@@ -2073,6 +2099,12 @@ point distribution.
 
 **Worked Examples**
 
+**Override example:** With a lowest measurement at 16, another at 32, and `"c_min_override": 32`, both
+are in the Ultra Low Concurrency region and either may supply its one required accuracy result. With
+$C_{max}=1024$, the
+remaining regions are Low 33–42, Medium 43–131, and High 132–1024. If the override is not set, then
+$C_{min}=16$ and the boundaries follow Example C.
+
 <details>
 <summary><strong>Example A — Large-Scale System ($C_{min} = 32$; $C_{max} = 8,192$)</strong></summary>
 
@@ -2080,7 +2112,7 @@ point distribution.
 I = log2(8192 - 32) / 3 = log2(8160) / 3 = 12.994 / 3 = 4.331
 
 Region boundaries:
-  Low Latency point:        concurrency    32
+  Ultra Low Concurrency: concurrency 1 – 32
   Low Concurrency:    concurrency   33 –   52  (round(32 + 2^4.331) = round(32 + 20.1) = 52)
   Med Concurrency:    concurrency   53 –  437  (round(32 + 2^8.663) = round(32 + 405.2) = 437)
   High Concurrency:   concurrency  438 – 8192
@@ -2096,7 +2128,7 @@ Minimum 7-point example: {32, 40, 200, 500, 1000, 2000, 4096}
 I = log2(256 - 1) / 3 = log2(255) / 3 = 7.994 / 3 = 2.665
 
 Region boundaries:
-  Low Latency point:       concurrency  1
+  Ultra Low Concurrency: concurrency 1 – 1
   Low Concurrency:   concurrency 2 –  7  (round(1 + 2^2.665) = round(1 + 6.34) = 7)
   Med Concurrency:   concurrency 8 –  41  (round(1 + 2^5.33) = round(1 + 40.21) = 41)
   High Concurrency:  concurrency 42 – 256
@@ -2112,10 +2144,10 @@ Minimum 7-point example: {1, 4, 16, 32, 64, 128, 256}
 I = log2(1024 - 16) / 3 = log2(1008) / 3 = 9.977 / 3 = 3.326
 
 Region boundaries:
-  Low Latency point:       concurrency   16
-  Low Concurrency:   concurrency  16 –   26  (round(16 + 2^3.326) = round(16 + 10.0) = 26)
-  Med Concurrency:   concurrency  27 –  116  (round(16 + 2^6.652) = round(16 + 100.4) = 116)
-  High Concurrency:  concurrency 117 – 1024
+  Ultra Low Concurrency: concurrency 1 – 16
+  Low Concurrency:   concurrency  17 –   26
+  Med Concurrency:   concurrency  27 –  117
+  High Concurrency:  concurrency 118 – 1024
 
 Minimum 7-point example: {16, 24, 64, 96, 128, 256, 1000}
 ```
@@ -2142,10 +2174,10 @@ submitted points.
 
 ```python
 def compute_regions(C_max: int, C_min: int) -> dict:
-    assert 1 <= C_min <= 32, "Minimum concurrency must be between 1 and 32 (inclusive)"
+    assert 1 <= C_min <= 32, "Ultra low concurrency region boundary must be between 1 and 32 (inclusive)"
     assert C_max > 32, "Maximum Supported Concurrency must be > 32"
 
-    # Low Latency point (in Ultra Low Concurrency region)
+    # Ultra Low Concurrency region, with C_min selected according to §5.4.
     low_latency = {"start": 1, "end": C_min}
 
     # Compute log-space interval
@@ -2331,22 +2363,23 @@ Each measurement point must sustain the target concurrency for a minimum duratio
 measurement, excluding warmup. These values correspond to the `min_duration_ms` setting in
 `RuntimeSettings`.
 
+The duration thresholds below and the dataset requirements in §§6.4–6.5 depend on the point's
+concurrency, independently of its §5.4 region or `c_min_override`. For example, concurrency 24 uses
+the 1–32 requirements even when `c_min_override=16` places it in the Low Concurrency region.
+
 For Legacy LLM (non-agentic) benchmarks:
-| Concurrency Region | Minimum Duration (steady state) | Rationale |
+
+| Concurrency | Minimum Duration (steady state) | Rationale |
 |---|---|---|
-| Ultra Low Concurrency (1–32) | 600 seconds | Reduced duration accounts for slower query completion at ultra low concurrency. |
-| Low Concurrency | 1200 seconds | Standard duration for statistical confidence at scale. |
-| Medium Concurrency | 1200 seconds | Standard duration for statistical confidence at scale. |
-| High Concurrency | 1200 seconds | Standard duration for statistical confidence at scale. |
+| 1–32 (inclusive) | 600 seconds | Reduced duration accounts for slower query completion at low concurrency. |
+| Greater than 32 | 1200 seconds | Standard duration for statistical confidence at scale. |
 
 For all Agentic benchmarks:
 
-| Concurrency Region | Minimum Duration (steady state) | Rationale |
+| Concurrency | Minimum Duration (steady state) | Rationale |
 |---|---|---|
-| Ultra Low Concurrency (1–32) | 600 seconds | Reduced duration accounts for slower query completion at ultra low concurrency. |
-| Low Concurrency | 2400 seconds | Standard duration for statistical confidence at scale. |
-| Medium Concurrency | 2400 seconds | Standard duration for statistical confidence at scale. |
-| High Concurrency | 2400 seconds | Standard duration for statistical confidence at scale. |
+| 1–32 (inclusive) | 600 seconds | Reduced duration accounts for slower query completion at low concurrency. |
+| Greater than 32 | 2400 seconds | Standard duration for statistical confidence at scale. |
 
 ### 6.3 Warmup Period
 
@@ -2408,12 +2441,10 @@ Each measurement point must complete a minimum number of queries (`min_sample_co
 `RuntimeSettings`). The minimum ensures sufficient statistical confidence in the reported percentile
 metrics.
 
-| Concurrency Region | Minimum Completed Queries | Rationale |
+| Concurrency | Minimum Completed Queries | Rationale |
 |---|---|---|
-| Ultra Low Concurrency (1–32) | One pass over the Ultra low concurrency dataset | Lower count acceptable given longer run duration. |
-| Low Concurrency | One pass over the dataset | Consistent and comparable accuracy across all runs. |
-| Medium Concurrency | One pass over the dataset | Consistent and comparable accuracy across all runs.  |
-| High Concurrency | One pass over the dataset | Consistent and comparable accuracy across all runs.  |
+| 1–32 (inclusive) | One pass over the dataset, or the approved subset under §6.5 | An approved subset reduces run time at low concurrency. |
+| Greater than 32 | One pass over the dataset | Consistent and comparable accuracy across all runs. |
 
 > [!NOTE]
 > These minimum query counts require statistical validation against required sample sizes for target
@@ -2429,7 +2460,7 @@ the dataset size.
 - Performance runs use `WithReplacementSampleOrder` (random sampling with replacement from the
   performance dataset).
 - Accuracy runs use `WithoutReplacementSampleOrder` (each sample exactly once).
-- For Ultra Low Concurrency region runs, a representative subset of the dataset may be used
+- For runs at concurrency 1–32 (inclusive), a representative subset of the dataset may be used
   (configured via `n_samples_from_dataset`) to reduce run time, subject to pre-approval by the
   working group. The subset must be documented and identical across all submitters.
 - Fixed-concurrency performance runs must use streaming responses (`model_params.streaming` resolves
@@ -2568,6 +2599,7 @@ Endpoints submissions must include the following metadata:
 | `driver` | Driver and version number for any accelerators. |
 | `container_link` | Link to container for submission. |
 | `max_supported_concurrency` | Declared Maximum Supported Concurrency `M`. |
+| `c_min_override` | **Optional.** Declared lower region boundary, subject to [§5.4](#54-regions-of-interest). Omit to derive it from the points. |
 | `endpoint_url` | URL or description of the endpoint under test. |
 | `operating_system` | OS used for the node. |
 | `filesystem` | Filesystem used for the node. |
@@ -2587,6 +2619,8 @@ Endpoints submissions must include the following metadata:
 #### 8.2.1 Template Structure
 
 `results/<system>/<model_name>/r<N>/system_desc.json` contains the fields defined in the table above.
+
+The template omits the optional `c_min_override`; its declaration rules are in §5.4.
 
 ```json
 {
@@ -2740,10 +2774,11 @@ performs the following checks:
 | **Per-point node declaration** | Where a point declares `nodes_used` ([§8.3](#83-measurement-point-yaml)): every `system_node_ensemble_id` resolves to a node set in `system_power.json`; each `nodes` value is a positive integer not exceeding that set's provisioned `N_s`; and the implied accelerator count is consistent with the parallelism configuration in `system_desc.json` ([§4.5.3](#453-normalized-metric)). | Reject submission. |
 | **Per-point denominator** | `system_tps_per_kw` at each point equals `system_tps / point_power_kw` recomputed by the checker, with `Y_s = N_s` for any point not declaring `nodes_used`. | Reject submission. |
 | **Maximal engagement** | Accelerators engaged at each point equal `DP × A_replica` with `DP = floor(A_provisioned / A_replica)`, derived from the point's parallelism configuration ([§4.5.3](#453-normalized-metric)). A point falling short without a `dp_shortfall` declaration is non-conforming. | Reject submission. |
-| **Point count** | ≥ 8 total measurement points including a dedicated Offline run (non-agentic); ≥ 7 where the $C_{max}$ point is elected as the Offline result, or for agentic benchmarks. | Reject submission. |
+| **Point count** | ≥ 8 total measurement points including a dedicated Offline run (non-agentic); ≥ 7 where the $C_{max}$ point is elected as the Offline result, or for agentic benchmarks. Choice-point placement follows §5.3. | Reject submission. |
 | **Offline point present** | Exactly one point carries an `offline` declaration of `dedicated` or `elected` for non-agentic benchmarks; none is present for agentic benchmarks ([§5.7](#57-offline-point)). An `elected` declaration appears on the $C_{max}$ point. | Reject submission. |
-| **Accuracy run count** | Results from exactly `N` accuracy validation runs are present — 5 for non-agentic, 4 SWE-bench evaluations for agentic ([§4.3](#43-accuracy-metric)) — one per mandatory point, and none at a submitter's-choice point. Inline accuracy scores neither count toward `N` nor count as extra validation runs. More or fewer than `N` validation runs is non-conforming. | Reject submission. |
-| **Ultra Low Concurrency coverage** | ≥ 1 point with concurrency in [1, 32]. | Reject submission. |
+| **Accuracy run count** | Exactly `N` accuracy validation results are present — 5 for non-agentic, 4 for agentic ([§4.3](#43-accuracy-metric)) — one per mandatory point, and none at a submitter's-choice point. Inline accuracy scores neither count toward `N` nor count as extra validation runs. More or fewer than `N` validation results is non-conforming. | Reject submission. |
+| **C_min override** | Declaration type, range, matching submitted point, and consistency satisfy §5.4. | Reject submission. |
+| **Ultra Low Concurrency coverage** | ≥ 1 point in the Ultra Low Concurrency region defined by §5.4. | Reject submission. |
 | **Low Concurrency coverage** | ≥ 1 point in the Low Concurrency region. | Reject submission. |
 | **Medium Concurrency coverage** | ≥ 1 point in the Medium Concurrency region. | Reject submission. |
 | **High Concurrency coverage** | ≥ 1 point in the High Concurrency region. | Reject submission. |
@@ -2759,6 +2794,7 @@ performs the following checks:
 | **Warmup logs retained** | Warmup request logs are retained and available for reviewer inspection (see [§6.3.2](#632-discard-policy)). | Flag non-compliant points. |
 | **Metric consistency** | The valid per-response TPOT distribution must be non-empty with a finite, strictly positive P90; the normalized P90 value in milliseconds is `tpot_p90_ms` and `tps_per_user = 1000 / tpot_p90_ms`. The authoritative result schema defines TPOT serialization and units. | Flag inconsistent points. |
 | **Agentic metric consistency** | Reported agentic metrics are derivable from their §4 definitions. | Flag inconsistent points. |
+| **Accuracy** | Required results satisfy §4.3's band assignment and single-turn or multi-turn gate. | Reject submission. |
 | **Accuracy validation** | Validation results are present for all points required by §5.3 and satisfy the applicable single-turn or multi-turn gate in §4.3. For agentic benchmarks, the mean is over the four SWE-bench results only. | Reject submission. |
 | **Agentic inline accuracy** | Every submitted agentic performance point, including all submitter's-choice points, reports an inline score from its performance run and individually meets the model-specific threshold (§4.3). Missing, null, or below-threshold scores are non-conforming. | Reject submission. |
 | **Seed-set validity** | For an initial submission, every point must record the same seed set, and that set must have been published for `target_cohort` or one of the three immediately preceding cohorts. For an amendment, every new or replacement point must match the original submission's bound seed set; the four-cohort adoption test is not reapplied using the amendment's later cohort. See [Submission Rules §4.6](endpoints_submission_rules.md#46-seed-rotation). | Reject submission. |
@@ -2967,10 +3003,10 @@ brought into line with Standardized is worth confirming.
 <details>
 <summary><strong>Quick-Reference Region Boundaries by $C_{min}$ and $C_{max}$</strong></summary>
 
-Pre-computed region boundaries for common combinations of Minimum Concurrency ($C_{min}$) and
+Pre-computed region boundaries for common combinations of the lower region boundary ($C_{min}$) and
 Maximum Supported Concurrency ($C_{max}$) values using the reference algorithm.
 
-| Max Concurrency <br>($C_{max}$) | Min Concurrency <br>($C_{min}$) | Low Concurrency | Medium Concurrency | High Concurrency | 10% Margin |
+| Max Concurrency <br>($C_{max}$) | Lower Boundary <br>($C_{min}$) | Low Concurrency | Medium Concurrency | High Concurrency | 10% Margin |
 |---|---|---|---|---|---|
 | 64 | 2 | 3–6 | 7–18 | 19–64 | 65–71 |
 | 128 | 2 | 3–7 | 8–27 | 28–128 | 129–141 |
@@ -2987,7 +3023,8 @@ Maximum Supported Concurrency ($C_{max}$) values using the reference algorithm.
 | 8,192 | 32 | 33–52 | 53–437 | 438–8,192 | 8,193–9,012 |
 | 16,384 | 32 | 33–57 | 58–676 | 677–16,384 | 16,385–18,023 |
 
-*All boundaries computed using the reference algorithm in [§5.5](#55-region-boundary-reference-algorithm) with banker's rounding. The Low Latency point is a single point at the declared $C_{min}$ value (in the Ultra Low Concurrency region); all concurrency regions and their boundaries are submission-specific and depend on both $C_{min}$ and $C_{max}$.*
+Boundaries use [§5.5](#55-region-boundary-reference-algorithm) with banker's rounding.
+$C_{min}$ selection and Ultra Low coverage follow [§5.4](#54-regions-of-interest).
 
 </details>
 
